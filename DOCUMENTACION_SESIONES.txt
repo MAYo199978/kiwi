@@ -1,0 +1,556 @@
+SISTEMA DE GESTIÓN DE MULTISESIONES - KIWI
+Documentación Técnica del Manejo de Sesiones
+
+================================================================================
+INTRODUCCIÓN GENERAL
+================================================================================
+
+El sistema Kiwi es una aplicación web desarrollada con Laravel que implementa un 
+completo sistema de gestión de multisesiones para usuarios. La aplicación demuestra 
+mejores prácticas de seguridad en autenticación, manejo de sesiones, cookies seguras 
+y recuperación de sesiones con funcionalidad de "Recordar Usuario".
+
+Este documento describe en detalle cómo funcionan todos los mecanismos de sesión 
+implementados, su arquitectura técnica, los componentes involucrados y cómo 
+interactúan entre sí para proporcionar una experiencia segura y confiable.
+
+
+================================================================================
+ARQUITECTURA GENERAL DEL SISTEMA DE SESIONES
+================================================================================
+
+El sistema de sesiones en Kiwi se construye sobre cuatro pilares fundamentales:
+
+1. Inicio de Sesión Único (Single Session Login)
+2. Cookies Seguras y Encriptadas
+3. Recuperación de Sesiones
+4. Funcionalidad de Recordar Usuario (Remember Me)
+
+Estos componentes trabajan juntos para garantizar que cada usuario tenga una y solo 
+una sesión activa en cualquier momento, mientras que sus datos de autenticación se 
+mantienen protegidos con encriptación de nivel empresarial.
+
+El flujo comienza cuando un usuario se autentica en la aplicación. Esta autenticación 
+genera una sesión única que se almacena en la base de datos y se vincula con un 
+identificador de sesión encriptado en una cookie del navegador. Cualquier intento 
+posterior de iniciar sesión con las mismas credenciales en otro dispositivo o 
+navegador detectará una sesión existente y la invalidará automáticamente.
+
+
+================================================================================
+1. INICIO DE SESIÓN ÚNICO (SINGLE SESSION LOGIN)
+================================================================================
+
+Concepto y Propósito
+
+El inicio de sesión único, comúnmente conocido como Single Session Login, es un 
+mecanismo de seguridad que garantiza que un usuario solo puede tener una sesión 
+activa en cualquier momento. Cuando el usuario intenta iniciar sesión desde un nuevo 
+dispositivo o navegador mientras ya tiene una sesión activa en otro lugar, la sesión 
+anterior se cierra automáticamente.
+
+Este sistema es especialmente importante en aplicaciones que manejan información 
+sensible o que requieren control de acceso estricto, ya que previene el acceso 
+simultáneo desde múltiples ubicaciones.
+
+Implementación Técnica
+
+La implementación en Kiwi se realiza a través de varios componentes:
+
+Primero, se almacena un identificador de sesión en la base de datos. La tabla "users" 
+contiene una columna adicional llamada "session_id" que registra el ID de la sesión 
+activa actual del usuario. Esta información se actualiza cada vez que el usuario 
+inicia sesión exitosamente.
+
+En el controlador de autenticación (LoginController.php), cuando un usuario inicia 
+sesión, el sistema ejecuta los siguientes pasos:
+
+a) Valida las credenciales del usuario contra la base de datos
+b) Si las credenciales son correctas, regenera el ID de sesión para mayor seguridad
+c) Obtiene la información del usuario autenticado
+d) Actualiza la columna session_id del usuario con el nuevo ID de sesión
+e) Guarda estos cambios en la base de datos
+f) Redirige al usuario al panel de control
+
+Middleware de Verificación de Sesión
+
+Para mantener el cumplimiento del single session login durante toda la sesión del 
+usuario, se implementa un middleware personalizado llamado CheckSingleSession. Este 
+middleware se ejecuta en cada solicitud HTTP que hace el usuario mientras está 
+autenticado.
+
+El middleware verifica si el ID de sesión actual del usuario coincide con el ID de 
+sesión almacenado en la base de datos. Si no coincide, significa que el usuario 
+ha iniciado sesión desde otro lugar, por lo que el sistema automáticamente:
+
+a) Invalida la sesión actual
+b) Cierra la sesión del usuario
+c) Regenera el token CSRF
+d) Redirige al usuario a la página de inicio de sesión
+e) Muestra un mensaje informativo explicando que la sesión fue cerrada
+
+Este mecanismo garantiza que la sesión anterior se cierra en tiempo real tan pronto 
+como se detecta un nuevo inicio de sesión.
+
+Beneficios de Seguridad
+
+El single session login previene varios tipos de ataques y problemas de seguridad:
+
+- Evita el robo de cuentas mediante sesiones robadas, ya que solo una sesión es válida
+- Previene el uso no autorizado de credenciales en múltiples dispositivos simultáneamente
+- Notifica al usuario cuando alguien intenta acceder a su cuenta desde otro lugar
+- Proporciona control administrativo sobre quién puede acceder a la cuenta en cada momento
+- Reduce la superficie de ataque al mantener activa solo una sesión por usuario
+
+
+================================================================================
+2. COOKIES SEGURAS Y ENCRIPTADAS
+================================================================================
+
+¿Qué son las Cookies de Sesión?
+
+Una cookie es un pequeño archivo de datos que el navegador almacena localmente y 
+envía automáticamente al servidor con cada solicitud. Las cookies de sesión 
+específicamente contienen un identificador que permite al servidor identificar qué 
+usuario está haciendo cada solicitud.
+
+Sin cookies, el usuario tendría que proporcionar sus credenciales en cada página que 
+visita. Con cookies, el servidor recuerda quién es el usuario después de la autenticación 
+inicial.
+
+Encriptación de Cookies en Kiwi
+
+En Kiwi, todas las cookies se encriptan automáticamente utilizando el algoritmo AES-256-CBC, 
+que es un estándar de encriptación de nivel militar. Esto significa que cuando abres 
+Developer Tools y miras las cookies, ves una cadena encriptada que parece aleatoria y 
+no contiene información legible.
+
+El contenido encriptado incluye tres componentes principales:
+
+- IV (Initialization Vector): Un vector de inicialización único para cada encriptación
+- Value: Los datos reales encriptados (el ID de sesión y otros datos)
+- MAC: Un código de autenticación de mensajes que verifica que la cookie no ha sido modificada
+
+Cuando el navegador envía esta cookie encriptada al servidor, Laravel la desencripta 
+automáticamente usando una clave secreta almacenada en el archivo .env. Si alguien 
+intentara modificar la cookie o usar una cookie de otro usuario, el MAC fallaría y 
+la solicitud sería rechazada.
+
+Atributos de Seguridad de las Cookies
+
+Además de la encriptación, Kiwi configura varios atributos de seguridad en las cookies:
+
+El atributo HTTP-Only previene que el código JavaScript en la página pueda acceder 
+a la cookie. Esto protege contra ataques XSS (Cross-Site Scripting) donde código 
+malicioso intenta robar cookies.
+
+El atributo SameSite se configura como "lax", lo que significa que la cookie solo se 
+envía con solicitudes que provienen del mismo sitio. Esto protege contra ataques CSRF 
+(Cross-Site Request Forgery) donde un sitio malicioso intenta realizar acciones en 
+nombre del usuario.
+
+El atributo Path se establece en "/", lo que significa que la cookie está disponible 
+en todas las rutas de la aplicación.
+
+Tipos de Cookies en la Aplicación
+
+Kiwi utiliza varias cookies para diferentes propósitos:
+
+LARAVEL_SESSION es la cookie principal que contiene el identificador de sesión 
+encriptado. Esta es la cookie que vincula al navegador con la sesión del servidor.
+
+XSRF-TOKEN es una cookie que contiene un token CSRF encriptado. Este token se utiliza 
+para verificar que las solicitudes POST, PUT, DELETE y PATCH provienen realmente de 
+tu aplicación y no de un sitio externo malicioso.
+
+Kiwi_Session es otra variación del nombre de la cookie de sesión que se puede 
+configurar según las preferencias de la aplicación.
+
+Todas estas cookies se envían automáticamente con cada solicitud HTTP al servidor 
+y se procesan automáticamente sin intervención del usuario.
+
+
+================================================================================
+3. RECUPERACIÓN DE SESIONES
+================================================================================
+
+¿Qué es la Recuperación de Sesiones?
+
+La recuperación de sesiones es la capacidad de mantener al usuario autenticado después 
+de eventos como cerrar el navegador, apagar la computadora o navegar a otra aplicación. 
+Sin este mecanismo, los usuarios tendrían que iniciar sesión nuevamente cada vez que 
+cierren su navegador, lo cual sería muy inconveniente.
+
+Almacenamiento de Sesiones en Base de Datos
+
+En Kiwi, las sesiones se almacenan en la base de datos MySQL en una tabla llamada 
+"sessions". Esta tabla contiene la siguiente información:
+
+La columna "id" almacena el identificador único de la sesión.
+La columna "user_id" registra qué usuario es propietario de esta sesión (puede ser NULL 
+para visitantes no autenticados).
+La columna "ip_address" guarda la dirección IP desde la que se originó la sesión.
+La columna "user_agent" almacena información sobre el navegador y dispositivo utilizados.
+La columna "payload" contiene todos los datos de la sesión encriptados.
+La columna "last_activity" registra la marca de tiempo de la última actividad del usuario.
+
+Duración de las Sesiones
+
+Las sesiones sin la opción "Recordar Usuario" tienen una duración configurable. Por defecto, 
+Kiwi establece a 120 minutos (2 horas) el tiempo de vida de una sesión. Esto significa que 
+si un usuario no realiza ninguna actividad durante 120 minutos, su sesión expira automáticamente 
+y debe iniciar sesión nuevamente.
+
+Este tiempo se puede modificar en el archivo de configuración config/session.php mediante la 
+variable SESSION_LIFETIME. Un tiempo más corto aumenta la seguridad pero reduce la comodidad 
+del usuario. Un tiempo más largo mejora la experiencia del usuario pero puede representar un 
+riesgo de seguridad mayor.
+
+Mecanismo de Limpieza de Sesiones Expiradas
+
+El servidor ejecuta ocasionalmente un proceso de limpieza de sesiones expiradas. Esto se 
+configura mediante una "lotería" de probabilidades: en cada solicitud, existe una pequeña 
+probabilidad (por defecto 2 de cada 100 solicitudes) de que se ejecute el proceso de limpieza.
+
+Cuando se ejecuta este proceso, el servidor busca todas las sesiones cuya columna "last_activity" 
+es más antigua que el tiempo de vida configurado y las elimina de la base de datos. Esto evita 
+que la tabla de sesiones crezca indefinidamente.
+
+Renovación Automática de Sesiones
+
+Cada vez que un usuario realiza una acción (carga una página, hace una solicitud AJAX, etc.), 
+la marca de tiempo de last_activity se actualiza. Esto renueva efectivamente la sesión, 
+iniciando el contador de inactividad nuevamente desde cero.
+
+Por ejemplo, si la duración es de 120 minutos y el usuario carga una página después de 100 
+minutos de inactividad, su sesión se renueva por otros 120 minutos completos. Esto significa 
+que usuarios activos nunca verán sus sesiones expirar a menos que estén completamente inactivos 
+durante el período especificado.
+
+Recuperación Manual mediante Remember Token
+
+Además del mecanismo automático de recuperación de sesiones, Kiwi implementa un mecanismo 
+adicional basado en un "token de recordación" almacenado en la tabla de usuarios. Este token 
+se utiliza cuando el navegador no tiene una sesión activa pero sí tiene una cookie de 
+"recordación" válida.
+
+
+================================================================================
+4. FUNCIONALIDAD DE RECORDAR USUARIO (REMEMBER ME)
+================================================================================
+
+Características del Remember Me
+
+La funcionalidad "Recordar Usuario" permite que un usuario permanezca autenticado por un 
+período mucho más largo, incluso después de cerrar completamente el navegador. Esta opción 
+se presenta como un checkbox en la página de inicio de sesión y está marcada por defecto 
+para mayor comodidad.
+
+Cuando el usuario marca la casilla "Recordarme" durante el inicio de sesión, el sistema 
+crea un token especial denominado "remember token" o "rememberable token" que se almacena 
+tanto en la base de datos (en la tabla users) como en una cookie del navegador con 
+duración extendida.
+
+Duración del Remember Token
+
+Mientras que una sesión normal expira después de 120 minutos de inactividad, el remember token 
+persiste durante aproximadamente 365 días (un año). Esto significa que si marca "Recordarme", 
+podrá acceder a su cuenta durante todo un año sin necesidad de volver a ingresar sus credenciales, 
+siempre que el navegador y el dispositivo no cambien.
+
+Almacenamiento en Base de Datos
+
+La tabla "users" en Kiwi contiene una columna llamada "remember_token" que almacena el token 
+encriptado del usuario. Cuando el usuario marca "Recordarme", Laravel genera automáticamente 
+un token criptográficamente seguro y lo guarda en esta columna.
+
+Este token es prácticamente imposible de adivinar o reproducir, ya que se genera utilizando 
+algoritmos criptográficos seguros con una longitud suficiente (típicamente 80 caracteres) 
+para resistir ataques de fuerza bruta.
+
+Mecanismo de Validación
+
+Cuando un usuario abre la aplicación sin una sesión activa pero con una cookie de remember 
+token vigente, el sistema realiza el siguiente proceso:
+
+a) Busca la cookie "remember" en el navegador
+b) Desencripta el token contenido en la cookie
+c) Busca en la base de datos un usuario cuyo remember_token coincida exactamente
+d) Si encuentra una coincidencia, valida que el token no haya expirado
+e) Si todo es válido, establece automáticamente una nueva sesión para el usuario
+f) Si no encuentra coincidencia o el token está vacío, redirige a la página de login
+
+Este proceso es transparente para el usuario: simplemente abre la aplicación y accede 
+a su cuenta sin necesidad de ingresar credenciales.
+
+Seguridad del Remember Token
+
+Aunque el remember token proporciona comodidad, también representa un riesgo potencial de 
+seguridad si se compromete. Por esa razón, Kiwi implementa varias medidas de seguridad:
+
+El token se encripta utilizando la misma encriptación AES-256-CBC que se usa para las cookies.
+La cookie de remember se configura con los atributos HTTP-Only y SameSite igual que las 
+sesiones normales.
+El token tiene una fecha de expiración después de la cual ya no es válido.
+Si el usuario cierra manualmente su sesión, el remember token se elimina de la base de datos.
+Si el usuario inicia sesión desde otro dispositivo, se genera un nuevo token reemplazando 
+el antiguo.
+
+Conclusión del Remember Me
+
+La funcionalidad "Recordar Usuario" proporciona un equilibrio entre comodidad y seguridad. 
+Los usuarios pueden elegir si desean que su navegador recuerde su autenticación por un 
+período extendido, mientras que el sistema mantiene la seguridad mediante encriptación 
+fuerte y validación de tokens.
+
+
+================================================================================
+5. FLUJO TÉCNICO COMPLETO DE AUTENTICACIÓN
+================================================================================
+
+Paso 1: Visualización del Formulario de Login
+
+Cuando el usuario accede a la URL http://127.0.0.1:8000/login, el servidor verifica 
+primero si el usuario ya está autenticado. Si es así, se redirige a la página de inicio 
+o dashboard. Si no está autenticado, se renderiza la vista del formulario de login.
+
+El formulario de login contiene dos campos de entrada (email y contraseña), un checkbox 
+de "Recordarme", y un botón de envío. El formulario también incluye un token CSRF oculto 
+que proporciona protección contra ataques de falsificación de solicitudes entre sitios.
+
+Paso 2: Envío de Credenciales
+
+Cuando el usuario completa el formulario y presiona el botón "Iniciar Sesión", el navegador 
+envía una solicitud HTTP POST a la URL http://127.0.0.1:8000/login con los datos del formulario. 
+Esta solicitud incluye el email, la contraseña, el estado del checkbox "Recordarme", 
+y el token CSRF.
+
+Paso 3: Validación de Credenciales
+
+El LoginController recibe la solicitud y valida primero que el email sea un formato válido 
+de correo electrónico y que la contraseña sea un campo presente. Si estas validaciones fallan, 
+se rechaza la solicitud.
+
+Luego, el controlador utiliza el método Auth::attempt() que intenta encontrar un usuario 
+con el email proporcionado y verifica que la contraseña coincida con el hash almacenado 
+en la base de datos. Las contraseñas nunca se almacenan en texto plano; Laravel utiliza 
+algoritmos de hashing de una sola dirección (bcrypt) que hacen imposible recuperar la 
+contraseña original.
+
+Paso 4: Fallo en Autenticación
+
+Si Auth::attempt() retorna false (credenciales incorrectas), el controlador redirige al 
+usuario nuevamente a la página de login con un mensaje de error que indica que las 
+credenciales no coinciden. Por razones de seguridad, el mensaje no especifica si fue 
+el email o la contraseña que fue incorrecto.
+
+Paso 5: Éxito en Autenticación
+
+Si Auth::attempt() retorna true (credenciales correctas), comienza el proceso de 
+establecimiento de sesión:
+
+a) Laravel regenera automáticamente el ID de sesión para evitar ataques de fijación de sesión
+b) Se crea una nueva cookie de sesión encriptada con el nuevo ID
+c) El controlador obtiene la instancia del usuario autenticado
+d) Se actualiza la columna session_id del usuario con el nuevo ID de sesión
+e) Se guarda este cambio en la base de datos
+f) Si el usuario marcó "Recordarme", se genera y almacena un remember token
+
+Paso 6: Redirección al Dashboard
+
+Después de completar todo el proceso de autenticación, el controlador redirige al usuario 
+a la página del dashboard (http://127.0.0.1:8000/dashboard). Esta redirección incluye 
+la cookie de sesión encriptada, por lo que el navegador envía automáticamente el identificador 
+de sesión en todas las solicitudes posteriores.
+
+Paso 7: Acceso a Recursos Protegidos
+
+Cuando el usuario accede a cualquier página protegida como el dashboard, el middleware 
+de autenticación verifica primero que exista una sesión válida. Luego, el middleware 
+CheckSingleSession verifica que el ID de sesión actual coincida con el ID almacenado en 
+la base de datos.
+
+Solo si ambas verificaciones pasan, el usuario puede acceder a la página solicitada. 
+Si alguna verificación falla, se redirige a la página de login.
+
+Paso 8: Cierre Manual de Sesión
+
+Cuando el usuario presiona el botón "Cerrar Sesión", se envía una solicitud POST a la 
+ruta de logout. El LogoutController ejecuta los siguientes pasos:
+
+a) Elimina la columna session_id del usuario (la establece como NULL)
+b) Invoca Auth::logout() que desataca el usuario autenticado de esta solicitud
+c) Invalida la sesión actual eliminando todos los datos de sesión
+d) Regenera un nuevo token CSRF
+e) Si existe un remember token, lo elimina de la base de datos
+f) Redirige al usuario al inicio de la aplicación
+
+
+================================================================================
+6. COMPONENTES DEL SISTEMA
+================================================================================
+
+Tablas de Base de Datos
+
+La implementación del sistema de sesiones requiere varias tablas en la base de datos:
+
+Tabla "users": Almacena la información del usuario incluyendo nombre, email, contraseña 
+hasheada, remember_token, y session_id. El campo session_id es el que vincula al usuario 
+con su sesión activa actual.
+
+Tabla "sessions": Almacena todas las sesiones activas. Contiene el ID de sesión, el ID 
+del usuario (si está autenticado), dirección IP, user agent, fecha de última actividad 
+y los datos de sesión encriptados.
+
+Tabla "password_reset_tokens": Utilizada para la recuperación de contraseña olvidada 
+(aunque no está completamente implementada en esta versión).
+
+Tabla "failed_jobs": Utilizada si la aplicación implementa colas de trabajos en segundo plano.
+
+Tabla "personal_access_tokens": Utilizada para la autenticación mediante API si se 
+implementa Sanctum.
+
+Archivos de Configuración
+
+El archivo config/session.php contiene todas las configuraciones relacionadas con sesiones:
+
+'driver' establece el medio de almacenamiento de sesiones (database, file, cookie, etc.). 
+En Kiwi está configurado como 'database'.
+
+'lifetime' establece la duración en minutos de la sesión. Kiwi usa 120 minutos.
+
+'expire_on_close' determina si la sesión debe expirar cuando el navegador se cierra.
+
+'encrypt' determina si los datos de sesión se encriptan antes de almacenarse.
+
+'cookie' establece el nombre de la cookie de sesión.
+
+'secure' determina si la cookie se envía solo bajo conexiones HTTPS (false en desarrollo, 
+true en producción).
+
+'http_only' determina si la cookie no es accesible desde JavaScript.
+
+'same_site' establece el atributo SameSite de la cookie (lax, strict, none).
+
+Controladores de Autenticación
+
+LoginController.php maneja toda la lógica de inicio de sesión incluyendo validación de 
+credenciales, establecimiento de variables de sesión, y redirección al dashboard.
+
+RegisterController.php maneja el registro de nuevos usuarios incluyendo validación de datos, 
+creación de usuario, inicio de sesión automático y redirección.
+
+Middleware de Seguridad
+
+CheckSingleSession.php es el middleware personalizado que verifica en cada solicitud que 
+la sesión actual sea la única sesión válida del usuario.
+
+Authenticate.php es el middleware que verifica que el usuario esté autenticado antes de 
+acceder a recursos protegidos.
+
+Vistas de Usuario
+
+login.blade.php renderiza el formulario de inicio de sesión con validación del lado del cliente.
+
+register.blade.php renderiza el formulario de registro con verificación de fortaleza de contraseña.
+
+dashboard.blade.php renderiza el panel de control que solo es accesible por usuarios autenticados.
+
+
+================================================================================
+7. SEGURIDAD Y BUENAS PRÁCTICAS
+================================================================================
+
+Protección Contra Ataques Comunes
+
+El sistema implementa protección contra varios tipos de ataques de seguridad:
+
+Ataque XSS (Cross-Site Scripting): Las cookies están configuradas como HTTP-Only, lo que 
+previene que scripts maliciosos del navegador accedan a los datos de autenticación.
+
+Ataque CSRF (Cross-Site Request Forgery): Todas las solicitudes que modifican estado (POST, 
+PUT, DELETE) requieren un token CSRF válido.
+
+Ataque de Fijación de Sesión: El ID de sesión se regenera después de cada inicio de sesión, 
+lo que invalida cualquier sesión anterior que pudiera haber sido fijada.
+
+Ataque de Fuerza Bruta: Aunque no explícitamente implementado en esta versión, Laravel 
+proporciona mecanismos de limitación de velocidad que se pueden configurar.
+
+Robo de Sesión: El single session login previene que si una sesión se roba, se pueda usar 
+simultáneamente en múltiples ubicaciones.
+
+Mejores Prácticas Implementadas
+
+Las contraseñas no se almacenan en texto plano. Se utilizan algoritmos de hashing de una sola 
+dirección (bcrypt) que permiten verificar una contraseña sin reversa.
+
+Las cookies se encriptan automáticamente con AES-256-CBC.
+
+El token CSRF proporciona protección adicional contra ataques de falsificación.
+
+Las sesiones se almacenan en la base de datos en lugar de en archivos, lo que permite mejor 
+escalabilidad y seguridad.
+
+El remember token se encripta y almacena de forma segura.
+
+Los datos sensibles nunca se exponen en URLs, solo se envían mediante POST seguro.
+
+Se implementa middleware para validar la autenticación en rutas protegidas.
+
+
+================================================================================
+8. FUNCIONANTAMIENTO PRÁCTICO
+================================================================================
+
+Escenario 1: Inicio de Sesión Normal
+
+Un usuario accede a la aplicación e ingresa sus credenciales. Después de la autenticación 
+exitosa, recibe una cookie de sesión encriptada. Mientras navega por la aplicación, esta 
+cookie se envía con cada solicitud. Después de 120 minutos de inactividad, la sesión expira 
+automáticamente y el usuario debe iniciar sesión nuevamente.
+
+Escenario 2: Inicio de Sesión con Remember Me
+
+Un usuario marca "Recordarme" al iniciar sesión. Además de la sesión normal, se genera un 
+remember token de larga duración. Si el usuario cierra el navegador e intenta acceder de 
+nuevo después de una hora, la sesión normal ha expirado pero el remember token aún es válido, 
+por lo que se establece automáticamente una nueva sesión sin necesidad de volver a ingresar 
+credenciales.
+
+Escenario 3: Detección de Multisesión
+
+Un usuario inicia sesión en su navegador Edge en una ventana normal. Luego abre una ventana 
+privada de Edge e intenta iniciar sesión con las mismas credenciales. El sistema detecta que 
+ya existe una session_id para este usuario y crea una nueva, reemplazando la anterior en la 
+base de datos. Cuando el usuario regresa a la primera ventana, el middleware CheckSingleSession 
+detecta que el session_id no coincide y cierra automáticamente su sesión con un mensaje informativo.
+
+Escenario 4: Cierre Manual de Sesión
+
+Un usuario presiona el botón "Cerrar Sesión" en el dashboard. Se ejecuta el LogoutController 
+que elimina la sesión de la base de datos, limpia todas las cookies de sesión y redirige 
+al usuario a la página de inicio. Si el usuario había marcado "Recordarme", también se elimina 
+el remember token.
+
+Escenario 5: Acceso sin Sesión Activa
+
+Un usuario con remember token activo pero sin sesión abierta accede a la aplicación. El 
+middleware detecta que no hay sesión activa pero sí existe una cookie de remember token válida. 
+Utiliza este token para establecer automáticamente una nueva sesión sin requerir credenciales.
+
+
+================================================================================
+CONCLUSIÓN
+================================================================================
+
+El sistema Kiwi implementa un completo y robusto sistema de gestión de sesiones que 
+proporciona tanto seguridad como conveniencia. Cada componente, desde las cookies encriptadas 
+hasta el middleware de verificación de sesión única, trabaja en conjunto para crear una 
+experiencia segura y confiable para los usuarios mientras mantiene el más alto nivel de 
+protección contra ataques y compromisos de seguridad.
+
+La arquitectura implementada sigue las mejores prácticas de la industria y utiliza tecnologías 
+probadas de seguridad criptográfica. Aunque la aplicación está diseñada con propósitos educativos 
+y de demostración, los mismos principios y patrones se pueden aplicar a aplicaciones 
+de producción con modificaciones y enhancements adicionales según sea necesario.
